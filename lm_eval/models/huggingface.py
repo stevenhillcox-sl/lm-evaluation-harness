@@ -202,6 +202,7 @@ class HFLM(LM):
                 **bnb_4bit_config,
             ) if load_in_4bit or load_in_8bit else None
 
+            eval_logger.info(f"Loading model, {pretrained}")
             self._model = self.AUTO_MODEL_CLASS.from_pretrained(
                 pretrained,
                 revision=revision,
@@ -237,6 +238,7 @@ class HFLM(LM):
         if peft:
             if load_in_4bit:
                 assert PEFT_VERSION >= "0.4.0", "load_in_4bit requires peft >= 0.4.0"
+            eval_logger.info(f"Applying LoRA, {peft}")
             self._model = PeftModel.from_pretrained(
                 self._model, peft, revision=revision, 
                 cache_dir=cache_dir,
