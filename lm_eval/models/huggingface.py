@@ -89,6 +89,8 @@ class HFLM(LM):
         offload_folder: Optional[str] = "./offload",
         # PEFT and quantization options
         peft: Optional[str] = None,
+        # I heard you like adapters, so I put an adapter over your adapter, so you can adapt whilst you adapt
+        peft2: Optional[str] = None,
         load_in_8bit: bool = False,
         load_in_4bit: bool = False,
         bnb_double_quant: bool = False,
@@ -241,6 +243,14 @@ class HFLM(LM):
             eval_logger.info(f"Applying LoRA, {peft}")
             self._model = PeftModel.from_pretrained(
                 self._model, peft, revision=revision, 
+                cache_dir=cache_dir,
+            )
+        
+        if peft2:
+            assert peft, f"you have specified an additional LoRA peft2 ({peft2}) without specifying a first LoRA via peft arg"
+            eval_logger.info(f"Applying another LoRA, {peft2}")
+            self._model = PeftModel.from_pretrained(
+                self._model.eval(), peft2,
                 cache_dir=cache_dir,
             )
 
