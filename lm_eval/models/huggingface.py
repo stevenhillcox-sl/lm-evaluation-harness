@@ -24,7 +24,7 @@ from lm_eval.api.registry import register_model
 from lm_eval.utils import MultiTokenEOSCriteria, stop_sequences_criteria
 
 from accelerate import Accelerator, find_executable_batch_size
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Literal
 
 
 def _get_accelerate_args(
@@ -89,10 +89,11 @@ class HFLM(LM):
         offload_folder: Optional[str] = "./offload",
         # PEFT and quantization options
         peft: Optional[str] = None,
-        load_in_8bit: Optional[bool] = False,
-        load_in_4bit: Optional[bool] = False,
-        bnb_double_quant: Optional[bool] = True,
-        bnb_4bit_quant_type: Optional[str] = None,
+        load_in_8bit: bool = False,
+        load_in_4bit: bool = False,
+        bnb_double_quant: bool = False,
+        # fp4 is the default in BitsAndBytesConfig, but please note that nf4 is likely better (information-theoretically optimal)
+        bnb_4bit_quant_type: Literal['nf4', 'fp4'] = 'fp4',
         bnb_4bit_compute_dtype: Optional[Union[str, torch.dtype]] = None,
         gptq: Optional[Union[bool, str]] = False,
         gptq_use_triton: Optional[bool] = False,
