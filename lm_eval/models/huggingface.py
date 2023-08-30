@@ -2,6 +2,7 @@ import os
 
 import torch
 import transformers
+from transformers import BitsAndBytesConfig
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES,
     MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING_NAMES,
@@ -23,7 +24,7 @@ from lm_eval.api.registry import register_model
 from lm_eval.utils import MultiTokenEOSCriteria, stop_sequences_criteria
 
 from accelerate import Accelerator, find_executable_batch_size, DistributedType
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Literal
 
 
 def _get_accelerate_args(
@@ -88,9 +89,11 @@ class HFLM(LM):
         offload_folder: Optional[str] = "./offload",
         # PEFT and quantization options
         peft: Optional[str] = None,
-        load_in_8bit: Optional[bool] = False,
-        load_in_4bit: Optional[bool] = False,
-        bnb_4bit_quant_type: Optional[str] = None,
+        load_in_8bit: bool = False,
+        load_in_4bit: bool = False,
+        bnb_double_quant: bool = False,
+        # fp4 is the default in BitsAndBytesConfig, but please note that nf4 is likely better (information-theoretically optimal)
+        bnb_4bit_quant_type: Literal['nf4', 'fp4'] = 'fp4',
         bnb_4bit_compute_dtype: Optional[Union[str, torch.dtype]] = None,
         gptq: Optional[Union[bool, str]] = False,
         gptq_use_triton: Optional[bool] = False,
@@ -184,23 +187,31 @@ class HFLM(LM):
                 assert (
                     transformers.__version__ >= "4.30.0"
                 ), "load_in_4bit requires transformers >= 4.30.0"
-            if transformers.__version__ >= "4.30.0":
-                model_kwargs["load_in_4bit"] = load_in_4bit
-                if load_in_4bit:
-                    if bnb_4bit_quant_type:
-                        model_kwargs["bnb_4bit_quant_type"] = bnb_4bit_quant_type
-                    if bnb_4bit_compute_dtype:
-                        model_kwargs["bnb_4bit_compute_dtype"] = utils.get_dtype(
-                            bnb_4bit_compute_dtype
-                        )
+
+            bnb_4bit_config = {
+                'load_in_4bit': load_in_4bit,
+                'bnb_4bit_compute_dtype': utils.get_dtype(bnb_4bit_compute_dtype),
+                'bnb_4bit_use_double_quant': bnb_double_quant,
+                'bnb_4bit_quant_type': bnb_4bit_quant_type,
+            } if transformers.__version__ >= "4.30.0" else {}
+
+            quantization_config = BitsAndBytesConfig(
+                load_in_8bit=load_in_8bit,
+                llm_int8_threshold=6.0,
+                llm_int8_has_fp16_weight=False,
+                **bnb_4bit_config,
+            ) if load_in_4bit or load_in_8bit else None
+
             self._model = self.AUTO_MODEL_CLASS.from_pretrained(
                 pretrained,
                 revision=revision,
                 torch_dtype=utils.get_dtype(dtype),
                 low_cpu_mem_usage=low_cpu_mem_usage,
                 trust_remote_code=trust_remote_code,
+                load_in_4bit=load_in_4bit,
                 load_in_8bit=load_in_8bit,
                 cache_dir=cache_dir,
+                quantization_config=quantization_config,
                 **model_kwargs,
             )
         else:
