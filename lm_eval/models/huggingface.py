@@ -154,6 +154,7 @@ class HFLM(LM):
             pretrained,
             revision=revision,
             trust_remote_code=trust_remote_code,
+            cache_dir=cache_dir,
         )
 
         if getattr(self._config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES:
@@ -199,6 +200,7 @@ class HFLM(LM):
                 low_cpu_mem_usage=low_cpu_mem_usage,
                 trust_remote_code=trust_remote_code,
                 load_in_8bit=load_in_8bit,
+                cache_dir=cache_dir,
                 **model_kwargs,
             )
         else:
@@ -225,7 +227,8 @@ class HFLM(LM):
             if load_in_4bit:
                 assert PEFT_VERSION >= "0.4.0", "load_in_4bit requires peft >= 0.4.0"
             self._model = PeftModel.from_pretrained(
-                self._model, peft, revision=revision
+                self._model, peft, revision=revision, 
+                cache_dir=cache_dir,
             )
 
         # forever after, access self._model through self.model property
@@ -245,6 +248,7 @@ class HFLM(LM):
             revision=revision,
             trust_remote_code=trust_remote_code,
             use_fast=use_fast_tokenizer,
+            cache_dir=cache_dir,
         )
 
         self.truncation = truncation
