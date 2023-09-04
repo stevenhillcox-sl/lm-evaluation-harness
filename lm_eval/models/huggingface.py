@@ -1,8 +1,12 @@
 import os
+from os.path import splitext
 
 import torch
 import transformers
-from transformers import BitsAndBytesConfig
+from safetensors.torch import load_file
+from torch import FloatTensor
+from torch.nn import Embedding, Linear
+from transformers import BitsAndBytesConfig, LlamaTokenizerFast, LlamaTokenizer
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES,
     MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING_NAMES,
@@ -24,7 +28,7 @@ from lm_eval.api.registry import register_model
 from lm_eval.utils import MultiTokenEOSCriteria, stop_sequences_criteria
 
 from accelerate import Accelerator, find_executable_batch_size, DistributedType
-from typing import List, Optional, Union, Literal
+from typing import List, Optional, Union, Literal, OrderedDict
 
 
 def _get_accelerate_args(
@@ -94,6 +98,8 @@ class HFLM(LM):
         load_in_8bit: bool = False,
         load_in_4bit: bool = False,
         bnb_double_quant: bool = False,
+        input_embedding_path: Optional[str] = None,
+        output_embedding_path: Optional[str] = None,
         # fp4 is the default in BitsAndBytesConfig, but please note that nf4 is likely better (information-theoretically optimal)
         bnb_4bit_quant_type: Literal['nf4', 'fp4'] = 'fp4',
         bnb_4bit_compute_dtype: Optional[Union[str, torch.dtype]] = None,
@@ -291,6 +297,38 @@ class HFLM(LM):
             self.batch_schedule = float(batch_size[1]) if len(batch_size) > 1 else 1
         else:
             self.batch_size_per_gpu = int(batch_size)
+
+        if input_embedding_path:
+            print(f'Applying finetuned input embedding weights from {input_embedding_path}.')
+            _, extension = splitext(input_embedding_path)
+            if extension == '.pt':
+                input_embed_state_dict: OrderedDict[str, FloatTensor] = torch.load(input_embedding_path, map_location=self.model.device, weights_only=True)
+            else:
+                assert extension == '.safetensors', "only .pt and .safetensors embeddings state dict files are supported"
+                input_embed_state_dict: OrderedDict[str, FloatTensor] = load_file(input_embedding_path, device=self.model.device)
+            embed_tokens: Embedding = self.model.get_input_embeddings()
+            orig_device, orig_dtype = embed_tokens.weight.device, embed_tokens.weight.dtype
+
+            assert input_embed_state_dict['weight'].shape[0] == len(self.tokenizer), f"embeddings state dict must have an embedding per token in the tokenizer. tokenizer had {len(self.tokenizer)} tokens, embedding had {input_embed_state_dict['weight'].shape[0]} embeddings."
+            embed_tokens: Embedding = self.model.resize_token_embeddings(len(self.tokenizer))
+
+            embed_tokens.load_state_dict(input_embed_state_dict)
+            embed_tokens.weight.to(device=orig_device, dtype=orig_dtype)
+
+        if output_embedding_path is not None:
+            print(f'Applying finetuned output embedding weights from {output_embedding_path}.')
+            _, extension = splitext(output_embedding_path)
+            if extension == '.pt':
+                lm_head_state_dict: OrderedDict[str, FloatTensor] = torch.load(output_embedding_path, map_location=self.model.device, weights_only=True)
+            else:
+                assert extension == '.safetensors', "only .pt and .safetensors embeddings state dict files are supported"
+                lm_head_state_dict: OrderedDict[str, FloatTensor] = load_file(output_embedding_path, device=self.model.device)
+            lm_head: Optional[Linear] = self.model.get_output_embeddings()
+            assert lm_head is not None, "if you are finetuning the lm_head, it'd be weird to find that the base model didn't have one at all"
+            orig_device, orig_dtype = lm_head.weight.device, lm_head.weight.dtype
+
+            lm_head.load_state_dict(lm_head_state_dict)
+            lm_head.weight.to(device=orig_device, dtype=orig_dtype)
 
         # multigpu data-parallel support when launched with accelerate
         if gpus > 1:
