@@ -305,20 +305,6 @@ class HFLM(LM):
             embed_tokens: Embedding = self.model.get_input_embeddings()
             orig_device, orig_dtype = embed_tokens.weight.device, embed_tokens.weight.dtype
 
-            if 'llama' in pretrained or isinstance(self.tokenizer, LlamaTokenizer) or isinstance(self.tokenizer, LlamaTokenizerFast):
-                # LLaMA tokenizer may not have correct special tokens set.
-                # Check and add them if missing to prevent them from being parsed into different tokens.
-                # Note that these are present in the vocabulary.
-                # Note also that `model.config.pad_token_id` is 0 which corresponds to `<unk>` token.
-                print('Adding special tokens.')
-                self.tokenizer.add_special_tokens({
-                    "eos_token": self.tokenizer.convert_ids_to_tokens(self.model.config.eos_token_id),
-                    "bos_token": self.tokenizer.convert_ids_to_tokens(self.model.config.bos_token_id),
-                    "unk_token": self.tokenizer.convert_ids_to_tokens(
-                        self.model.config.pad_token_id if self.model.config.pad_token_id != -1 else self.tokenizer.pad_token_id
-                    ),
-                })
-
             assert input_embed_state_dict['weight'].shape[0] == len(self.tokenizer), f"embeddings state dict must have an embedding per token in the tokenizer. tokenizer had {len(self.tokenizer)} tokens, embedding had {input_embed_state_dict['weight'].shape[0]} embeddings."
             embed_tokens: Embedding = self.model.resize_token_embeddings(len(self.tokenizer))
 
