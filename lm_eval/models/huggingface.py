@@ -28,7 +28,7 @@ from lm_eval.api.registry import register_model
 from lm_eval.utils import MultiTokenEOSCriteria, stop_sequences_criteria
 
 from accelerate import Accelerator, find_executable_batch_size, DistributedType
-from typing import List, Optional, Union, Literal, OrderedDict
+from typing import List, Optional, Union, Literal, OrderedDict, Dict
 
 
 def _get_accelerate_args(
@@ -105,6 +105,7 @@ class HFLM(LM):
         bnb_4bit_compute_dtype: Optional[Union[str, torch.dtype]] = None,
         gptq: Optional[Union[bool, str]] = False,
         gptq_use_triton: Optional[bool] = False,
+        use_flash_llama: bool = False,
     ) -> None:
         super().__init__()
 
@@ -168,6 +169,24 @@ class HFLM(LM):
             cache_dir=cache_dir,
         )
 
+        if use_flash_llama and self._config.model_type == 'llama':
+            updates: Dict[str, Union[str, int, float, bool, None]] = {}
+            flash_model_name = 'sl-alex/flash_llama--modeling_flash_llama.LlamaForCausalLM'
+            if 'num_key_value_heads' not in self._config.__dict__:
+                updates['num_key_value_heads'] = self._config.num_attention_heads
+            if 'auto_map' in self._config.__dict__:
+                if not ('AutoModelForCausalLM' in self._config.auto_map and 'flash' in self._config.auto_map['AutoModelForCausalLM']):
+                    updates['auto_map']['AutoModelForCausalLM'] = flash_model_name
+            else:
+                updates['auto_map'] = { 'AutoModelForCausalLM': flash_model_name }
+            if 'rope_scaling' not in self._config.__dict__:
+                max_len: int = HFLM._DEFAULT_MAX_LENGTH if max_length is None else max_length
+                updates['rope_scaling'] = { 'factor': max_len/self._config.max_position_embeddings, 'type': 'linear' }
+            if 'pretraining_tp' not in self._config.__dict__:
+                updates['pretraining_tp'] = 1
+            if updates:
+                self._config.update(updates)
+
         if getattr(self._config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES:
             self.AUTO_MODEL_CLASS = transformers.AutoModelForCausalLM
         elif (
@@ -213,6 +232,7 @@ class HFLM(LM):
             eval_logger.info(f"Loading model, {pretrained}")
             self._model = self.AUTO_MODEL_CLASS.from_pretrained(
                 pretrained,
+                config=self._config,
                 revision=revision,
                 torch_dtype=utils.get_dtype(dtype),
                 low_cpu_mem_usage=low_cpu_mem_usage,
