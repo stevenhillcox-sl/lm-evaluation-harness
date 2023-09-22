@@ -9,65 +9,66 @@ from tqdm import tqdm
 
 from lm_eval import utils
 from lm_eval.logger import eval_logger
+import re
 
 SUBJECTS = [
-    "abstract_algebra",
+    # "abstract_algebra",
     "anatomy",
-    "astronomy",
-    "business_ethics",
-    "clinical_knowledge",
-    "college_biology",
-    "college_chemistry",
-    "college_computer_science",
-    "college_mathematics",
-    "college_medicine",
-    "college_physics",
-    "computer_security",
-    "conceptual_physics",
-    "econometrics",
-    "electrical_engineering",
-    "elementary_mathematics",
-    "formal_logic",
-    "global_facts",
-    "high_school_biology",
-    "high_school_chemistry",
-    "high_school_computer_science",
-    "high_school_european_history",
-    "high_school_geography",
-    "high_school_government_and_politics",
-    "high_school_macroeconomics",
-    "high_school_mathematics",
-    "high_school_microeconomics",
-    "high_school_physics",
-    "high_school_psychology",
-    "high_school_statistics",
-    "high_school_us_history",
-    "high_school_world_history",
-    "human_aging",
-    "human_sexuality",
-    "international_law",
-    "jurisprudence",
-    "logical_fallacies",
-    "machine_learning",
-    "management",
-    "marketing",
-    "medical_genetics",
-    "miscellaneous",
-    "moral_disputes",
-    "moral_scenarios",
-    "nutrition",
-    "philosophy",
-    "prehistory",
-    "professional_accounting",
-    "professional_law",
-    "professional_medicine",
-    "professional_psychology",
-    "public_relations",
-    "security_studies",
-    "sociology",
-    "us_foreign_policy",
-    "virology",
-    "world_religions",
+    # "astronomy",
+    # "business_ethics",
+    # "clinical_knowledge",
+    # "college_biology",
+    # "college_chemistry",
+    # "college_computer_science",
+    # "college_mathematics",
+    # "college_medicine",
+    # "college_physics",
+    # "computer_security",
+    # "conceptual_physics",
+    # "econometrics",
+    # "electrical_engineering",
+    # "elementary_mathematics",
+    # "formal_logic",
+    # "global_facts",
+    # "high_school_biology",
+    # "high_school_chemistry",
+    # "high_school_computer_science",
+    # "high_school_european_history",
+    # "high_school_geography",
+    # "high_school_government_and_politics",
+    # "high_school_macroeconomics",
+    # "high_school_mathematics",
+    # "high_school_microeconomics",
+    # "high_school_physics",
+    # "high_school_psychology",
+    # "high_school_statistics",
+    # "high_school_us_history",
+    # "high_school_world_history",
+    # "human_aging",
+    # "human_sexuality",
+    # "international_law",
+    # "jurisprudence",
+    # "logical_fallacies",
+    # "machine_learning",
+    # "management",
+    # "marketing",
+    # "medical_genetics",
+    # "miscellaneous",
+    # "moral_disputes",
+    # "moral_scenarios",
+    # "nutrition",
+    # "philosophy",
+    # "prehistory",
+    # "professional_accounting",
+    # "professional_law",
+    # "professional_medicine",
+    # "professional_psychology",
+    # "public_relations",
+    # "security_studies",
+    # "sociology",
+    # "us_foreign_policy",
+    # "virology",
+    # "world_religions",
 ]
 
 
@@ -77,6 +78,8 @@ def parse_args():
     parser.add_argument("--save_prefix_path", default="flan")
     parser.add_argument("--cot_prompt_path", default=None)
     parser.add_argument("--task_prefix", default="")
+    parser.add_argument("--alpaca_template", default=False, action="store_true")
+    parser.add_argument("--stepwise", default=False, action="store_true")
     return parser.parse_args()
 
 
@@ -100,6 +103,21 @@ if __name__ == "__main__":
             description = cot_file[subject]
         else:
             description = f"The following are multiple choice questions (with answers) about {' '.join(subject.split('_'))}.\n\n"
+        
+        if args.alpaca_template:
+            # we don't include a BOS token in the template, because that's arguably a concern of the tokenizer config.
+            description = f'Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n{description}'
+            description = re.sub(r"^Q:.*$", "### Instruction:", description, flags=re.MULTILINE)
+            step_start = '<|step_start|>' if args.stepwise else ''
+            description = re.sub(r"^A: Let's think step by step. ", f"\n### Response:\n{step_start}", description, flags=re.MULTILINE)
+            if args.stepwise:
+                description = re.sub(r" The answer is \(([ABCD])\).", "<|step_end|><|step_start|><|answer_start|>\\1<|answer_end|><|step_end|>", description, flags=re.MULTILINE)
+                description = re.sub(r"Let’s solve this problem step by step. ", "", description, flags=re.MULTILINE)
+                description = re.sub(r"(We refer to Wikipedia articles on .* for help.)\s", "\\1<|step_end|><|step_start|>", description, flags=re.MULTILINE)
+                description = re.sub(r"\s(Now, let’s look at each option:\s)", "<|step_end|><|step_start|>\\1", description, flags=re.MULTILINE)
+                description = re.sub(r"\s(Because \([A-D]\).*\([A-D]\) is the only correct answer.)", "<|step_end|><|step_start|>\\1", description, flags=re.MULTILINE)
+                description = re.sub(r"\s(We know that.*\.)\s", "<|step_end|><|step_start|>\\1<|step_end|><|step_start|>", description, flags=re.MULTILINE)
+                description = re.sub(r"\s(Therefore, .*\.)", "<|step_end|><|step_start|>\\1", description, flags=re.MULTILINE)
 
         yaml_dict = {
             "include": base_yaml_name,
